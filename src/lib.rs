@@ -32,6 +32,7 @@ use std::io::Write;
 use dusk_jubjub::Scalar;
 use std::time::{Instant, SystemTime};
 use std::alloc::System;
+use std::ops::Mul;
 use chrono::{Duration};
 
 near_sdk::setup_alloc!();
@@ -184,6 +185,113 @@ impl Counter {
         println!("verification time:");
         println!("{:?}", SystemTime::now().duration_since(sy_time2).unwrap().as_millis());
     }
+
+    pub fn prove_and_verify_plain(&mut self) {
+        let sy_time = SystemTime::now();
+        //srs
+        let max_degree = 25 as usize;
+        let srs = PublicParameters::setup(max_degree, &mut StdRng::from_seed([2u8;32])).unwrap();
+        // let srs = PublicParameters::setup(max_degree, &mut rand::thread_rng()).unwrap();
+        let (proving_key, opening_key) = srs.trim(max_degree).unwrap();
+
+        // the random point that is chosen by the Verifier
+        let rand_point = BlsScalar::from(100).invert().unwrap();
+
+        //simulate the challenge and compute its invert
+        let k = 4;
+        let mut powers_of_x = vec![];
+        let mut content_vec = vec![];
+        let mut locate_vec_ori = vec![];
+        //all one, help to save the packed challenges
+        let mut cur = BlsScalar::one();
+        let mut locate = 0;
+        for _ in 0..(1 << k) {
+            powers_of_x.push(cur);
+            content_vec.push(BlsScalar::one());
+            locate_vec_ori.push(locate);
+            // println!("the current locate_vec_ori is {}", locate);
+            cur = rand_point * cur;
+            locate += 1;
+        }
+
+
+        let mut challenges = vec![];
+        let mut challenges_inv = vec![];
+        let mut packed_challenges = content_vec;
+
+        let mut cur_k = k;
+
+        let mut b = powers_of_x.clone();
+        //the current challenge should be a random challenge
+        let mut curchallenge = BlsScalar::from(109).invert().unwrap();
+        while b.len() > 1 {
+            let l = 1 << (cur_k - 1);
+            let mut curchallenge_inv = curchallenge.invert().unwrap();
+            challenges.push(curchallenge);
+            challenges_inv.push(curchallenge_inv);
+
+            for j in 0..l {
+                b[j] = (b[j] * curchallenge_inv) + (b[j + l] * curchallenge);
+            }
+            for i in 0..(1 << k) {
+                let tag  = locate_vec_ori[i] / l % 2;
+                // println!("the current tag is {}", tag);
+                if tag == 0 {
+                    packed_challenges[i] = packed_challenges[i] * curchallenge_inv.clone();
+                } else if tag == 1{ packed_challenges[i] = packed_challenges[i] * curchallenge.clone(); }
+            }
+
+
+            /// Shortens the vector, keeping the first `len` elements and dropping
+            /// the rest.
+            b.truncate(l);
+
+            cur_k -= 1;
+            curchallenge = (curchallenge.clone() + BlsScalar::from(129)).square();
+        }
+
+        let s_packed_challenge = packed_challenges;
+        let s_packed_challenge_poly = Polynomial::from_coefficients_vec(s_packed_challenge.clone());
+        let length = s_packed_challenge.len();
+
+
+        let mut G_vec = vec![];
+        for _ in 0..length{
+            let mut seed = 1u8;
+            G_vec.push(utils::random_g1_point(&mut StdRng::from_seed([seed;32])));
+            seed = seed + 1u8;
+        }
+        let mut mul_result = G_vec[0].mul(s_packed_challenge[0]);
+        for i in 0..length-1 {
+            mul_result = mul_result.add(&G_vec[i+1].mul(s_packed_challenge[i+1]))
+        }
+
+        println!("plain proving time:");
+        println!("{:?}", SystemTime::now().duration_since(sy_time).unwrap().as_millis());
+
+        /// output the size of the proof
+        // println!("{:?}", proof);
+        // let path = "./data/proofsize.txt";
+        // let mut output = File::create(path).unwrap();
+        // writeln!(output, "{:?}", proof);
+        //witness
+        // let witness_dual_s = proving_key.compute_single_witness(&s_packed_challenge_poly, &rand_point);
+        // let commit_witness_dual_s = proving_key.commit(&witness_dual_s).unwrap();
+
+        let sy_time2 = SystemTime::now();
+        let s = challenges;
+        let mut s_invert = challenges_inv;
+
+        let mut mul_result_v = G_vec[0].mul(s_packed_challenge[0]);
+        for i in 0..length-1 {
+            mul_result_v = mul_result_v.add(&G_vec[i+1].mul(s_packed_challenge[i+1]))
+        }
+
+        self.res = true;
+        assert_eq!(mul_result, mul_result_v);
+        println!("plain verification time:");
+        println!("{:?}", SystemTime::now().duration_since(sy_time2).unwrap().as_millis());
+    }
 }
 
 // unlike the struct's functions above, this function cannot use attributes #[derive(…)] or #[near_bindgen]
@@ -239,6 +347,7 @@ mod tests {
         contract.com();
         contract.prove_and_verify();
         println!("The afterwards result: {}", contract.get_num());
+        contract.prove_and_verify_plain();
 
     }
 }

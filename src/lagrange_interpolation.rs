@@ -3,7 +3,7 @@
 /// also be calculated.
 use crate::commitment_scheme::kzg10::CommitKey;
 use crate::fft::{EvaluationDomain, Evaluations, Polynomial};
-use dusk_bls12_381::BlsScalar;
+use dusk_bls12_381::{BlsScalar, G1Projective};
 use merlin::Transcript;
 use dusk_jubjub::Scalar;
 
@@ -66,6 +66,13 @@ pub fn compute_f(
         );
     }
 }
+
+// pub fn scalar_mul(
+//     s: Vec<BlsScalar>,
+//     g: G1Projective
+// ) -> G1Projective {
+//     assert!(s.len()==)
+// }
 
 #[test]
 fn test_compute_f() {
